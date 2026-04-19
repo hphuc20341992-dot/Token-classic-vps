@@ -1,0 +1,67 @@
+name: Windows-Build-Check
+on: 
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 25 # Đặt cao hơn 15 phút một chút để trừ hao
+
+    steps:
+      - name: 1. Preparing Environment
+        shell: powershell
+        run: |
+          Write-Host "Installing Tailscale..."
+          choco install tailscale -y --no-progress
+          # Khởi động service và bỏ qua lỗi nếu đã chạy
+          Start-Service tailscale -ErrorAction SilentlyContinue
+
+      - name: 2. Network Integration
+        shell: powershell
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          $TS_EXE = "C:\Program Files\Tailscale\tailscale.exe"
+          Write-Host "Connecting to Tailscale Network..."
+          & $TS_EXE up --authkey=$env:TAILSCALE_AUTH_KEY --hostname=GitHub-VM --accept-routes --reset
+
+      - name: 3. System Configuration
+        shell: powershell
+        run: |
+          Write-Host "Configuring Remote Desktop..."
+          net user runneradmin "Phuc1993"
+          # Mở cổng RDP và cấu hình bảo mật
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+      - name: 4. Wait 15 Minutes & Trigger Next Session
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          $waitMinutes = 15
+          Write-Host "This session will stay active for $waitMinutes minutes."
+          
+          # Vòng lặp đếm ngược để tránh GitHub ngắt do không có log
+          for ($i=1; $i -le $waitMinutes; $i++) {
+              Start-Sleep -Seconds 60
+              Write-Host "Running: $i/15 minutes elapsed..."
+          }
+
+          # Kích hoạt phiên mới ngay tại đây
+          Write-Host "----------------------------------------------"
+          Write-Host "Triggering NEW session now..."
+          gh workflow run "Windows-Build-Check" --repo ${{ github.repository }}
+          
+          if ($LASTEXITCODE -eq 0) {
+              Write-Host "Success: Next session is starting!"
+          } else {
+              Write-Error "Failed: Check your GH_PAT and Workflow Permissions (Read/Write)."
+          }
+
+      - name: 5. Hand-over Buffer
+        shell: powershell
+        run: |
+          Write-Host "Waiting 2 minutes for the new session to take over..."
+          Start-Sleep -Seconds 120
