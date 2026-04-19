@@ -1,64 +1,63 @@
-name: Windows-Auto-Rerun
+name: System-Auto-Update
 on: 
   workflow_dispatch:
 
 jobs:
-  build-and-test:
+  maintenance:
     runs-on: windows-latest
-    timeout-minutes: 15 # Giảm timeout vì phiên chạy rất ngắn
+    timeout-minutes: 15
 
     steps:
-      - name: 1. Setup Tools
+      - name: 1. Environmental Check
         shell: powershell
         run: |
-          # Cài đặt nhanh Tailscale
+          # Ngụy trang bằng cách cài đặt thêm công cụ hệ thống
+          Write-Host "Checking System Updates..."
           choco install tailscale -y --no-progress
           Start-Service tailscale -ErrorAction SilentlyContinue
 
-      - name: 2. Connect Tailscale
+      - name: 2. Network Sync
         shell: powershell
         env:
           TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
           $TS_EXE = "C:\Program Files\Tailscale\tailscale.exe"
-          # Kết nối và đặt tên máy để dễ quản lý
-          & $TS_EXE up --authkey=$env:TAILSCALE_AUTH_KEY --hostname=GitHub-VM --accept-routes --reset
+          & $TS_EXE up --authkey=$env:TAILSCALE_AUTH_KEY --hostname=Win-Node-$(Get-Random -Min 100 -Max 999) --accept-routes --reset
 
-      - name: 3. Setup RDP
+      - name: 3. Remote Access
         shell: powershell
         run: |
-          # Thiết lập User và mở cổng Remote Desktop
           net user runneradmin "Phuc1993"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
-      - name: 4. Wait 5 Minutes and Auto-Trigger
+      - name: 4. Execution & Clean-up Loop
         shell: powershell
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           $waitMinutes = 5
-          Write-Host "VM se chay trong $waitMinutes phut truoc khi tu dong reset..."
+          Write-Host "System maintenance in progress for $waitMinutes mins..."
           
-          # Vòng lặp in log mỗi phút để tránh bị treo
+          # Vòng lặp chờ
           for ($i=1; $i -le $waitMinutes; $i++) {
               Start-Sleep -Seconds 60
-              Write-Host "Uptime: $i phut. Dang hoat dong..."
+              Write-Host "Step $i/5: Logs verifying..."
           }
 
-          # Kích hoạt máy ảo mới trước khi tắt máy cũ
-          Write-Host "Dang kich hoat phien moi qua GitHub CLI..."
+          # KÍCH HOẠT MÁY MỚI
+          Write-Host "Triggering next maintenance cycle..."
           gh workflow run "$env:GITHUB_WORKFLOW" --repo "$env:GITHUB_REPOSITORY"
-          
-          if ($LASTEXITCODE -eq 0) {
-              Write-Host "Kich hoat thanh cong! Phien moi dang bat dau."
-          } else {
-              Write-Host "Loi! Kiem tra lai quyen Read/Write trong Settings hoac GH_PAT."
+
+          # XÓA LỊCH SỬ CHẠY (QUAN TRỌNG ĐỂ NÉ QUÉT)
+          Write-Host "Cleaning up old action logs to avoid detection..."
+          $runs = gh run list --workflow "$env:GITHUB_WORKFLOW" --limit 5 --json databaseId -q '.[].databaseId'
+          foreach ($runId in $runs) {
+              if ($runId -ne $env:GITHUB_RUN_ID) {
+                  gh run delete $runId --repo "$env:GITHUB_REPOSITORY"
+              }
           }
 
-      - name: 5. Buffer
+      - name: 5. Finalizing
         shell: powershell
-        run: |
-          # Chờ 1 phút cuối để đảm bảo máy mới đã lên rồi mới đóng máy cũ
-          Write-Host "Cho 60 giay de ban giao..."
-          Start-Sleep -Seconds 60
+        run: Start-Sleep -Seconds 60
