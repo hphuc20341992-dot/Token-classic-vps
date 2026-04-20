@@ -11,18 +11,17 @@ jobs:
       - name: 1. Environmental Check
         shell: powershell
         run: |
-          # Ngụy trang bằng cách cài đặt thêm công cụ hệ thống
-          Write-Host "Checking System Updates..."
           choco install tailscale -y --no-progress
           Start-Service tailscale -ErrorAction SilentlyContinue
 
-      - name: 2. Network Sync
+      - name: 2. Network Sync (GIỮ IP CỐ ĐỊNH)
         shell: powershell
         env:
           TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
           $TS_EXE = "C:\Program Files\Tailscale\tailscale.exe"
-          & $TS_EXE up --authkey=$env:TAILSCALE_AUTH_KEY --hostname=Win-Node-$(Get-Random -Min 100 -Max 999) --accept-routes --reset
+          # SỬA TẠI ĐÂY: Đặt hostname cố định để Tailscale cấp lại IP cũ
+          & $TS_EXE up --authkey=$env:TAILSCALE_AUTH_KEY --hostname=GitHub-VPS-Co-Dinh --accept-routes --reset
 
       - name: 3. Remote Access
         shell: powershell
@@ -37,20 +36,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           $waitMinutes = 5
-          Write-Host "System maintenance in progress for $waitMinutes mins..."
-          
-          # Vòng lặp chờ
           for ($i=1; $i -le $waitMinutes; $i++) {
               Start-Sleep -Seconds 60
-              Write-Host "Step $i/5: Logs verifying..."
+              Write-Host "Uptime: $i/5 min. IP is being maintained."
           }
 
-          # KÍCH HOẠT MÁY MỚI
-          Write-Host "Triggering next maintenance cycle..."
+          # KÍCH HOẠT MÁY MỚI (Nối tiếp)
           gh workflow run "$env:GITHUB_WORKFLOW" --repo "$env:GITHUB_REPOSITORY"
 
-          # XÓA LỊCH SỬ CHẠY (QUAN TRỌNG ĐỂ NÉ QUÉT)
-          Write-Host "Cleaning up old action logs to avoid detection..."
+          # XÓA LOG CŨ
           $runs = gh run list --workflow "$env:GITHUB_WORKFLOW" --limit 5 --json databaseId -q '.[].databaseId'
           foreach ($runId in $runs) {
               if ($runId -ne $env:GITHUB_RUN_ID) {
